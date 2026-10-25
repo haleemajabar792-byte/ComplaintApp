@@ -13,6 +13,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import axios from 'axios';
+import { API_URL } from '../config/api';
 
 export default function ProfileScreen({ navigation, onLogout }) {
   const [userName, setUserName] = useState('');
@@ -72,6 +74,17 @@ export default function ProfileScreen({ navigation, onLogout }) {
     }
     setSaving(true);
     try {
+      const token = await AsyncStorage.getItem('token');
+      if (token) {
+        try {
+          await axios.put(
+            `${API_URL}/api/auth/profile`,
+            { name: userName.trim(), phone: phone.trim() },
+            { headers: { Authorization: `Bearer ${token}` }, timeout: 6000 }
+          );
+        } catch (_) {}
+      }
+
       await AsyncStorage.multiSet([
         ['name', userName.trim()],
         ['phone', phone.trim()],

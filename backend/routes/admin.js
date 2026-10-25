@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const Complaint = require('../models/Complaint');
 const Admin = require('../models/Admin');
-const Department = require('../models/Department');
+const Feedback = require('../models/Feedback');
 const { verifyToken } = require('../middleware/auth');
 const pool = require('../config/db');
 require('dotenv').config();
@@ -131,12 +131,16 @@ router.post('/login', async (req, res) => {
 router.get('/stats', verifyToken, async (req, res) => {
   try {
     const complaints = await Complaint.getAll();
+    const feedbackStats = await Feedback.getStats();
+
     const stats = {
       total: complaints.length,
       pending: complaints.filter(c => c.Status === 'Pending').length,
       inProgress: complaints.filter(c => c.Status === 'In Progress').length,
       resolved: complaints.filter(c => c.Status === 'Resolved').length,
       closed: complaints.filter(c => c.Status === 'Closed').length,
+      averageRating: feedbackStats.averageRating || 0,
+      totalFeedback: feedbackStats.totalFeedback || 0,
     };
     res.status(200).json({ success: true, stats });
   } catch (error) {
@@ -210,34 +214,57 @@ router.patch('/complaints/:id/status', verifyToken, async (req, res) => {
   }
 });
 
-async function assignComplaintHandler(req, res) {
+// ROUTE 3: ASSIGN COMPLAINT TO DEPARTMENT (Supports both PUT and PATCH, ID and Name)
+const handleAssignComplaint = async (req, res) => {
   try {
     const complaintId = req.params.id;
-    const input = req.body.departmentId ?? req.body.department;
+    const deptParam = req.body.departmentId || req.body.department;
 
-    console.log('Received assign request:', { complaintId, input });
-    console.log('Request body:', req.body);
+    console.log('Received assign request:', { complaintId, deptParam });
 
-    if (input === undefined || input === null || input === '') {
+    if (!deptParam) {
       return res.status(400).json({
         success: false,
-        message: 'Department ID or name is required',
+        message: 'Department ID or Name is required',
       });
     }
 
-    const departmentId = await Department.resolveId(input);
-    if (!departmentId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Department not found. Choose a valid department from the list.',
-      });
+    let finalDeptId = null;
+    let deptName = null;
+
+    // Check if numeric ID or name string
+    const parsedId = parseInt(deptParam);
+    if (!isNaN(parsedId) && String(parsedId) === String(deptParam).trim()) {
+      const [rows] = await pool.query('SELECT DepartmentID, DepartmentName FROM department WHERE DepartmentID = ?', [parsedId]);
+      if (rows.length > 0) {
+        finalDeptId = rows[0].DepartmentID;
+        deptName = rows[0].DepartmentName;
+      }
+    } else {
+      // Find matching department by name
+      const cleanName = String(deptParam).trim().toLowerCase();
+      const [rows] = await pool.query('SELECT DepartmentID, DepartmentName FROM department');
+      const found = rows.find(d => 
+        d.DepartmentName.toLowerCase() === cleanName ||
+        d.DepartmentName.toLowerCase().includes(cleanName) ||
+        cleanName.includes(d.DepartmentName.toLowerCase())
+      );
+      if (found) {
+        finalDeptId = found.DepartmentID;
+        deptName = found.DepartmentName;
+      }
     }
 
-    const dept = await Department.findById(departmentId);
+    if (!finalDeptId) {
+      return res.status(400).json({
+        success: false,
+        message: `Department "${deptParam}" not found.`,
+      });
+    }
 
     const [result] = await pool.query(
       'UPDATE complaint SET DepartmentID = ? WHERE ComplaintID = ?',
-      [departmentId, complaintId]
+      [finalDeptId, complaintId]
     );
 
     if (result.affectedRows === 0) {
@@ -250,35 +277,54 @@ async function assignComplaintHandler(req, res) {
     res.status(200).json({
       message: 'Complaint assigned successfully',
       success: true,
-      complaintId: parseInt(complaintId, 10),
-      departmentId,
-      departmentName: dept?.DepartmentName,
+      complaintId: parseInt(complaintId),
+      departmentId: finalDeptId,
+      departmentName: deptName,
     });
+
   } catch (error) {
     console.error('Assign error:', error.message);
     res.status(500).json({
-      success: false,
       message: 'Failed to assign complaint',
       error: error.message,
     });
   }
-}
+};
 
-// ROUTE 3: ASSIGN COMPLAINT TO DEPARTMENT
-router.put('/complaints/:id/assign', verifyToken, assignComplaintHandler);
-router.patch('/complaints/:id/assign', verifyToken, assignComplaintHandler);
+router.put('/complaints/:id/assign', verifyToken, handleAssignComplaint);
+router.patch('/complaints/:id/assign', verifyToken, handleAssignComplaint);
 
-// ROUTE 4: GET DASHBOARD STATS
+// ROUTE 4: GET DASHBOARD STATS (Includes resolution rate, departments, feedback)
 router.get('/dashboard/stats', verifyToken, async (req, res) => {
   try {
     const complaints = await Complaint.getAll();
-    
+    const feedbackStats = await Feedback.getStats();
+
+    // Department breakdown
+    const [departments] = await pool.query('SELECT DepartmentID, DepartmentName FROM department');
+    const deptBreakdown = departments.map(d => ({
+      departmentId: d.DepartmentID,
+      departmentName: d.DepartmentName,
+      count: complaints.filter(c => c.DepartmentID === d.DepartmentID).length,
+    }));
+
+    const total = complaints.length;
+    const pending = complaints.filter(c => c.Status === 'Pending').length;
+    const inProgress = complaints.filter(c => c.Status === 'In Progress').length;
+    const resolved = complaints.filter(c => c.Status === 'Resolved').length;
+    const closed = complaints.filter(c => c.Status === 'Closed').length;
+
+    const resolutionRate = total > 0 ? Math.round(((resolved + closed) / total) * 100) : 0;
+
     const stats = {
-      total: complaints.length,
-      pending: complaints.filter(c => c.Status === 'Pending').length,
-      inProgress: complaints.filter(c => c.Status === 'In Progress').length,
-      resolved: complaints.filter(c => c.Status === 'Resolved').length,
-      closed: complaints.filter(c => c.Status === 'Closed').length,
+      total,
+      pending,
+      inProgress,
+      resolved,
+      closed,
+      resolutionRate,
+      feedback: feedbackStats,
+      departments: deptBreakdown,
     };
 
     res.status(200).json({
@@ -292,7 +338,7 @@ router.get('/dashboard/stats', verifyToken, async (req, res) => {
     console.error('Get stats error:', error.message);
     res.status(500).json({
       message: 'Failed to get stats',
-      error: error.message
+      error: error.message,
     });
   }
 });

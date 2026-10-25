@@ -15,9 +15,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
+import { API_URL } from '../../config/api';
 import { saveSession } from '../../utils/auth';
-
-const API_URL = 'http://192.168.0.115:5000';
 
 export default function AdminLoginScreen({ navigation, onLoginSuccess }) {
   const [email,          setEmail]          = useState('');
@@ -71,7 +70,7 @@ export default function AdminLoginScreen({ navigation, onLoginSuccess }) {
       showError(res.data.message || 'Invalid admin credentials.');
     } catch (err) {
       if (err.code === 'ECONNREFUSED' || err.message === 'Network Error') {
-        showError('Cannot reach server. Check that the backend is running and API_URL matches your PC IP.');
+        showError(`Cannot reach ${API_URL}. Start backend, same hotspot/Wi‑Fi, update frontend/config/api.js (ipconfig).`);
       } else if (err.response?.status === 401) {
         showError(err.response.data?.message || 'Invalid admin credentials.');
       } else {
@@ -278,7 +277,7 @@ const styles = StyleSheet.create({
     borderRadius: 99,
     paddingHorizontal: 12,
     paddingVertical: 4,
-    marginBottom: 108,
+    marginBottom: 16,
   },
   adminBadgeText: {
     color: '#f59e0b',

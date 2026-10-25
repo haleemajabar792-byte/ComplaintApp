@@ -11,19 +11,18 @@ export const forceClearAllData = async () => {
 
 // Save login data
 export const saveSession = async (token, studentId, name, email, institute, role = 'student', phone = '') => {
-  try {
-    await AsyncStorage.multiSet([
-      ['token',     token],
-      ['studentId', studentId.toString()],
-      ['name',      name],
-      ['email',     email],
-      ['institute', institute],
-      ['phone',     phone],
-      ['role',      role],
-    ]);
-  } catch (error) {
-    console.error('Save session error:', error);
+  if (!token) {
+    throw new Error('Missing auth token');
   }
+  await AsyncStorage.multiSet([
+    ['token',     token],
+    ['studentId', String(studentId || '')],
+    ['name',      name || ''],
+    ['email',     email || ''],
+    ['institute', institute || ''],
+    ['phone',     phone || ''],
+    ['role',      role || 'student'],
+  ]);
 };
 
 // Get login data

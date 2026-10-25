@@ -8,8 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
-
-const API_URL = 'http://192.168.0.115:5000';
+import { API_URL } from '../../config/api';
 
 // ─── StatCard component ──────────────────────────────────────────
 function StatCard({ label, value, icon, color, bg }) {

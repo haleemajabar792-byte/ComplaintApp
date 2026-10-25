@@ -4,9 +4,10 @@ class Student {
   // Find student by email (for login check)
   static async findByEmail(email) {
     try {
+      const normalized = String(email).toLowerCase().trim();
       const [rows] = await pool.query(
-        'SELECT * FROM student WHERE Email = ?',
-        [email]
+        'SELECT * FROM student WHERE LOWER(TRIM(Email)) = ?',
+        [normalized]
       );
       return rows[0]; // Return first row or undefined
     } catch (error) {
@@ -66,6 +67,32 @@ class Student {
       const [result] = await pool.query(
         'DELETE FROM student WHERE StudentID = ?',
         [studentId]
+      );
+      return result.affectedRows > 0;
+    } catch (error) {
+      throw new Error('Database query error: ' + error.message);
+    }
+  }
+
+  // Update student profile (for profile edits)
+  static async update(studentId, { name, phone }) {
+    try {
+      const updates = [];
+      const values = [];
+      if (name) {
+        updates.push('Name = ?');
+        values.push(name.trim());
+      }
+      if (phone !== undefined) {
+        updates.push('ContactNo = ?');
+        values.push(phone.trim());
+      }
+      if (updates.length === 0) return true;
+
+      values.push(studentId);
+      const [result] = await pool.query(
+        `UPDATE student SET ${updates.join(', ')} WHERE StudentID = ?`,
+        values
       );
       return result.affectedRows > 0;
     } catch (error) {

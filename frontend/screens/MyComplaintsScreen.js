@@ -1,21 +1,20 @@
-import React, { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import axios from 'axios';
+import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  FlatList,
-  TouchableOpacity,
-  StyleSheet,
-  Alert,
-  ActivityIndicator,
-  RefreshControl,
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    RefreshControl,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Ionicons } from '@expo/vector-icons';
-import axios from 'axios';
-
-const API_URL = 'http://192.168.0.115:5000';
+import { API_URL } from '../config/api';
 
 const STATUS_CONFIG = {
   pending:     { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)',   label: 'Pending' },
@@ -106,7 +105,9 @@ export default function MyComplaintsScreen({ navigation }) {
       const studentId = await AsyncStorage.getItem('studentId');
       const raw = await AsyncStorage.getItem('complaints');
       let local = raw ? JSON.parse(raw) : [];
-      local = local.filter(c => c.studentId === studentId);
+      if (studentId) {
+        local = local.filter(c => !c.studentId || String(c.studentId) === String(studentId));
+      }
       setComplaints(local);
 
       const token = await AsyncStorage.getItem('token');
@@ -116,23 +117,25 @@ export default function MyComplaintsScreen({ navigation }) {
             headers: { Authorization: `Bearer ${token}` },
             timeout: 5000,
           });
+          const rawDate = (item) => item.DateSubmitted || item.CreatedAt || item.date;
           const backend = (res.data?.complaints || []).map(bc => ({
             id: (bc.id || bc.ComplaintID || bc._id || Date.now()).toString(),
             title: bc.Title || bc.title || '',
             description: bc.Description || bc.description || '',
             category: bc.CategoryName || bc.category || 'General',
-            department: bc.DepartmentName || bc.department || 'Admin',
+            department: bc.DepartmentName || bc.department || 'Awaiting Assignment',
             institute: bc.Institute || bc.institute || '',
             status: (bc.Status || bc.status || 'pending').toLowerCase(),
             priority: (bc.Priority || bc.priority || 'medium').toLowerCase(),
-            date: bc.CreatedAt
-              ? new Date(bc.CreatedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-              : bc.date || new Date().toLocaleDateString(),
+            studentId: bc.StudentID || studentId,
+            date: rawDate(bc)
+              ? new Date(rawDate(bc)).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+              : new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }),
           }));
 
           const merged = [...local];
           backend.forEach(bc => {
-            const idx = merged.findIndex(lc => lc.id === bc.id || (lc.title === bc.title && lc.description === bc.description));
+            const idx = merged.findIndex(lc => lc.id.toString() === bc.id.toString() || (lc.title === bc.title && lc.description === bc.description));
             if (idx !== -1) merged[idx] = { ...merged[idx], ...bc };
             else merged.push(bc);
           });
@@ -168,7 +171,7 @@ export default function MyComplaintsScreen({ navigation }) {
             timeout: 6000,
           });
           
-          const updated = complaints.filter(c => c.id !== id);
+          const updated = complaints.filter(c => c.id.toString() !== id.toString());
           setComplaints(updated);
           await AsyncStorage.setItem('complaints', JSON.stringify(updated));
         } catch (error) {

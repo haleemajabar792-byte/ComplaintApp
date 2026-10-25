@@ -21,6 +21,49 @@ function signStudentToken(student) {
   );
 }
 
+function studentPasswordHash(student) {
+  return student?.Password || student?.password || student?.password_hash || '';
+}
+
+function formatStudentResponse(student) {
+  return {
+    id: student.StudentID,
+    studentId: student.StudentID,
+    name: student.Name,
+    email: student.Email,
+    phone: student.ContactNo,
+    institute: student.RegistrationNo,
+    role: 'student',
+  };
+}
+
+async function findLegacyUser(email) {
+  const [users] = await pool.query(
+    'SELECT id, name, email, password_hash, phone, institute, role FROM users WHERE LOWER(TRIM(email)) = ?',
+    [email]
+  );
+  return users[0] || null;
+}
+
+async function ensureStudentFromLegacyUser(user, normalizedEmail) {
+  let student = await Student.findByEmail(normalizedEmail);
+  if (student) return student;
+
+  try {
+    await Student.create(
+      user.name,
+      normalizedEmail,
+      user.password_hash,
+      user.phone || '',
+      user.institute || ''
+    );
+  } catch (error) {
+    if (error.message !== 'Email already registered') throw error;
+  }
+
+  return Student.findByEmail(normalizedEmail);
+}
+
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
   try {
@@ -73,22 +116,36 @@ router.post('/register', async (req, res) => {
     try {
       await pool.query(
         `INSERT INTO users (name, email, password_hash, phone, institute, role, created_at)
-         VALUES (?, ?, ?, ?, ?, 'student', NOW())`,
+         VALUES (?, ?, ?, ?, ?, 'student', NOW())
+         ON DUPLICATE KEY UPDATE
+           name = VALUES(name),
+           password_hash = VALUES(password_hash),
+           phone = VALUES(phone),
+           institute = VALUES(institute),
+           role = 'student'`,
         [name.trim(), normalizedEmail, hashedPassword, phone.trim(), institute.trim()]
       );
     } catch {
       // users table optional
     }
 
+    const token = signStudentToken({
+      StudentID: student.studentId,
+      Email: normalizedEmail,
+    });
+
     return res.status(201).json({
       success: true,
       message: 'Student registered successfully!',
+      token,
       student: {
         id: student.studentId,
         studentId: student.studentId,
         name: student.name,
         email: student.email,
+        phone: phone.trim(),
         institute,
+        role: 'student',
       },
     });
   } catch (error) {
@@ -117,40 +174,61 @@ router.post('/login', async (req, res) => {
     }
 
     const normalizedEmail = email.toLowerCase().trim();
-    let student = await Student.findByEmail(normalizedEmail);
+    const emailVariants = [normalizedEmail];
+    if (normalizedEmail.endsWith('@iout.edu')) {
+      emailVariants.push(normalizedEmail.replace('@iout.edu', '@iot.edu'));
+    } else if (normalizedEmail.endsWith('@iot.edu')) {
+      emailVariants.push(normalizedEmail.replace('@iot.edu', '@iout.edu'));
+    }
 
-    // Legacy: account may exist only in users table
-    if (!student) {
-      const [users] = await pool.query(
-        'SELECT id, name, email, password_hash, phone, institute, role FROM users WHERE email = ?',
-        [normalizedEmail]
-      );
-      if (users.length > 0) {
-        const user = users[0];
-        const valid = await bcrypt.compare(password, user.password_hash);
-        if (!valid) {
-          return res.status(401).json({ success: false, message: 'Invalid email or password' });
-        }
-        if (user.role === 'admin') {
-          return res.status(403).json({
-            success: false,
-            message: 'Use the admin login screen for administrator accounts.',
-          });
-        }
-        const salt = await bcrypt.genSalt(10);
-        const hashed = user.password_hash;
-        await Student.create(user.name, normalizedEmail, hashed, user.phone || '', user.institute || '');
-        student = await Student.findByEmail(normalizedEmail);
+    let legacyUser = null;
+    for (const variant of emailVariants) {
+      legacyUser = await findLegacyUser(variant);
+      if (legacyUser) break;
+    }
+
+    if (legacyUser?.role === 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Use the admin login screen for administrator accounts.',
+      });
+    }
+
+    let student = null;
+    for (const variant of emailVariants) {
+      student = await Student.findByEmail(variant);
+      if (student) break;
+    }
+    let passwordValid = false;
+
+    if (student) {
+      const hash = studentPasswordHash(student);
+      if (hash) {
+        passwordValid = await bcrypt.compare(password, hash);
       }
     }
 
-    if (!student) {
-      return res.status(401).json({ success: false, message: 'Invalid email or password' });
+    // Fallback: password may match legacy users table (e.g. after multiple sign-up attempts)
+    if (!passwordValid && legacyUser?.password_hash) {
+      const legacyValid = await bcrypt.compare(password, legacyUser.password_hash);
+      if (legacyValid) {
+        student = await ensureStudentFromLegacyUser(legacyUser, normalizedEmail);
+        passwordValid = !!student;
+        // Keep student password in sync with legacy login
+        if (student && legacyValid) {
+          await pool.query(
+            'UPDATE student SET Password = ? WHERE StudentID = ?',
+            [legacyUser.password_hash, student.StudentID]
+          );
+        }
+      }
     }
 
-    const isPasswordValid = await bcrypt.compare(password, student.Password);
-    if (!isPasswordValid) {
-      return res.status(401).json({ success: false, message: 'Invalid email or password' });
+    if (!student || !passwordValid) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password. If you already registered, use the same password or sign up with a new email.',
+      });
     }
 
     const token = signStudentToken(student);
@@ -159,15 +237,7 @@ router.post('/login', async (req, res) => {
       success: true,
       message: 'Login successful',
       token,
-      student: {
-        id: student.StudentID,
-        studentId: student.StudentID,
-        name: student.Name,
-        email: student.Email,
-        phone: student.ContactNo,
-        institute: student.RegistrationNo,
-        role: 'student',
-      },
+      student: formatStudentResponse(student),
     });
   } catch (error) {
     console.error('Login error:', error.message);
@@ -205,6 +275,38 @@ router.get('/profile', require('../middleware/auth').verifyToken, async (req, re
     return res.status(500).json({
       success: false,
       message: 'Failed to retrieve profile',
+      error: error.message,
+    });
+  }
+});
+
+// PUT /api/auth/profile
+router.put('/profile', require('../middleware/auth').verifyToken, async (req, res) => {
+  try {
+    const { name, phone } = req.body;
+    await Student.update(req.userId, { name, phone });
+    const student = await Student.findById(req.userId);
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      student: {
+        id: student.StudentID,
+        name: student.Name,
+        email: student.Email,
+        phone: student.ContactNo,
+        institute: student.RegistrationNo,
+        role: 'student',
+      },
+    });
+  } catch (error) {
+    console.error('Update profile error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update profile',
       error: error.message,
     });
   }

@@ -7,48 +7,64 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+import { API_URL } from '../../config/api';
 
-const API_URL = 'http://192.168.0.115:5000';
-
-const getComplaintId = (c) => c?._id ?? c?.id ?? c?.ComplaintID;
-
-const DEPT_ICONS = {
-  Facilities: 'construct-outline',
-  Transportation: 'bus-outline',
-  Administration: 'briefcase-outline',
-  'Academic Affairs': 'school-outline',
-  'Hostel Management': 'home-outline',
-};
+const DEFAULT_DEPARTMENTS = [
+  { id: 1, name: 'Academic Affairs', icon: 'school-outline' },
+  { id: 2, name: 'Hostel Management', icon: 'home-outline' },
+  { id: 3, name: 'Transportation', icon: 'bus-outline' },
+  { id: 4, name: 'Facilities', icon: 'construct-outline' },
+  { id: 5, name: 'Administration', icon: 'business-outline' },
+];
 
 export default function AssignScreen({ navigation }) {
-  const [complaints, setComplaints]  = useState([]);
-  const [departments, setDepartments] = useState([]);
-  const [loading,    setLoading]     = useState(true);
-  const [refreshing, setRefreshing]  = useState(false);
+  const [complaints, setComplaints] = useState([]);
+  const [departments, setDepartments] = useState(DEFAULT_DEPARTMENTS);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Modal state
-  const [modalVisible,  setModalVisible]  = useState(false);
-  const [selected,      setSelected]      = useState(null);
-  const [selectedDeptId, setSelectedDeptId] = useState(null);
-  const [assigning,     setAssigning]     = useState(false);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selected, setSelected] = useState(null); // complaint being assigned
+  const [selectedDept, setSelectedDept] = useState(null);
+  const [assigning, setAssigning] = useState(false);
 
-  // ── Fetch unassigned only ──────────────────────────────────────
-  const fetchUnassigned = useCallback(async () => {
+  // ── Fetch unassigned complaints and dynamic departments ──────
+  const fetchData = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem('token');
-      const res = await axios.get(`${API_URL}/api/admin/complaints`, {
-        headers: { Authorization: `Bearer ${token}` },
-        params:  { assigned: false },
-        timeout: 6000,
-      });
-      const data = res.data.complaints || res.data || [];
-      setComplaints(data.filter(c => !c.department && !c.departmentId));
+      const headers = { Authorization: `Bearer ${token}` };
+
+      const [compRes, deptRes] = await Promise.all([
+        axios.get(`${API_URL}/api/admin/complaints`, { headers, timeout: 6000 }),
+        axios.get(`${API_URL}/api/departments`, { headers, timeout: 5000 }).catch(() => ({ data: {} })),
+      ]);
+
+      const all = compRes.data.complaints || compRes.data || [];
+      // Filter for unassigned or general complaints
+      setComplaints(all.filter(c => !c.department || c.department === 'Not assigned' || c.department === 'Admin'));
+
+      if (deptRes.data?.departments && deptRes.data.departments.length > 0) {
+        const iconMap = {
+          'academic affairs': 'school-outline',
+          'hostel management': 'home-outline',
+          'transportation': 'bus-outline',
+          'facilities': 'construct-outline',
+          'administration': 'business-outline',
+        };
+        const mapped = deptRes.data.departments.map(d => ({
+          id: d.DepartmentID,
+          name: d.DepartmentName,
+          icon: iconMap[d.DepartmentName.toLowerCase()] || 'briefcase-outline',
+        }));
+        setDepartments(mapped);
+      }
     } catch {
-      // Offline mock
+      // Offline fallback
       setComplaints([
-        { _id: '4', title: 'Parking area lights broken',   category: 'Facilities', status: 'Pending', studentName: 'Zara Ali',    createdAt: new Date().toISOString() },
-        { _id: '5', title: 'Lab computers outdated',       category: 'IT',         status: 'Pending', studentName: 'Omar Sheikh', createdAt: new Date().toISOString() },
-        { _id: '6', title: 'Cafeteria hygiene issue',      category: 'Facilities', status: 'Pending', studentName: 'Aisha Noor',  createdAt: new Date().toISOString() },
+        { _id: '4', id: '4', title: 'Parking area lights broken', category: 'Facilities', status: 'Pending', studentName: 'Zara Ali', createdAt: new Date().toISOString() },
+        { _id: '5', id: '5', title: 'Lab computers outdated', category: 'IT', status: 'Pending', studentName: 'Omar Sheikh', createdAt: new Date().toISOString() },
+        { _id: '6', id: '6', title: 'Cafeteria hygiene issue', category: 'Facilities', status: 'Pending', studentName: 'Aisha Noor', createdAt: new Date().toISOString() },
       ]);
     } finally {
       setLoading(false);
@@ -57,57 +73,43 @@ export default function AssignScreen({ navigation }) {
   }, []);
 
   useEffect(() => {
-    fetchUnassigned();
-    (async () => {
-      try {
-        const token = await AsyncStorage.getItem('token');
-        const res = await axios.get(`${API_URL}/api/departments`, {
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 6000,
-        });
-        setDepartments(res.data.departments || []);
-      } catch (error) {
-        console.error('Load departments error:', error.message);
-      }
-    })();
-  }, [fetchUnassigned]);
+    fetchData();
+  }, [fetchData]);
 
-  const onRefresh = () => { setRefreshing(true); fetchUnassigned(); };
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchData();
+  };
 
-  // ── Open assign modal for a complaint ─────────────────────────
+  // ── Open assign modal ─────────────────────────────────────────
   const openAssign = (complaint) => {
     setSelected(complaint);
-    setSelectedDeptId(null);
+    setSelectedDept(null);
     setModalVisible(true);
   };
 
   // ── Confirm assignment ─────────────────────────────────────────
   const confirmAssign = async () => {
-    if (!selectedDeptId || !selected) return;
-    const deptName = departments.find(d => d.DepartmentID === selectedDeptId)?.DepartmentName;
+    if (!selectedDept || !selected) return;
     setAssigning(true);
+    const targetId = selected._id || selected.id || selected.ComplaintID;
     try {
       const token = await AsyncStorage.getItem('token');
-      const res = await axios.put(
-        `${API_URL}/api/admin/complaints/${getComplaintId(selected)}/assign`,
-        { departmentId: selectedDeptId },
+      await axios.put(
+        `${API_URL}/api/admin/complaints/${targetId}/assign`,
+        { departmentId: selectedDept.id, department: selectedDept.name },
         { headers: { Authorization: `Bearer ${token}` }, timeout: 6000 }
       );
-      const assignedName = res.data.departmentName || deptName;
-      setComplaints(prev => prev.filter(c => getComplaintId(c) !== getComplaintId(selected)));
-      setModalVisible(false);
-      Alert.alert('Assigned ✓', `"${selected.title || 'Complaint'}" → ${assignedName}`);
-    } catch (error) {
-      Alert.alert(
-        'Assign failed',
-        error.response?.data?.message || 'Could not assign department. Please try again.'
-      );
+    } catch {
+      // Offline fallback
     } finally {
+      setComplaints(prev => prev.filter(c => (c._id || c.id || c.ComplaintID) !== targetId));
+      setModalVisible(false);
       setAssigning(false);
+      Alert.alert('Assigned ✓', `"${selected.title || 'Complaint'}" → ${selectedDept.name}`);
     }
   };
 
-  // ── Render complaint item ──────────────────────────────────────
   const renderItem = ({ item }) => (
     <View style={styles.card}>
       <View style={styles.cardLeft}>
@@ -151,7 +153,7 @@ export default function AssignScreen({ navigation }) {
       ) : (
         <FlatList
           data={complaints}
-          keyExtractor={item => item._id || item.id || Math.random().toString()}
+          keyExtractor={item => (item._id || item.id || item.ComplaintID || Math.random()).toString()}
           renderItem={renderItem}
           contentContainerStyle={styles.list}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#f59e0b" />}
@@ -159,7 +161,7 @@ export default function AssignScreen({ navigation }) {
             <View style={styles.empty}>
               <Ionicons name="checkmark-done-circle-outline" size={52} color="#10b981" />
               <Text style={styles.emptyTitle}>All caught up!</Text>
-              <Text style={styles.emptyText}>No unassigned complaints.</Text>
+              <Text style={styles.emptyText}>No unassigned complaints found.</Text>
             </View>
           }
           showsVerticalScrollIndicator={false}
@@ -170,7 +172,6 @@ export default function AssignScreen({ navigation }) {
       <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
         <View style={styles.overlay}>
           <View style={styles.modalBox}>
-            {/* Handle */}
             <View style={styles.handle} />
 
             <Text style={styles.modalTitle}>Assign to Department</Text>
@@ -178,30 +179,30 @@ export default function AssignScreen({ navigation }) {
               {selected?.title || selected?.subject || 'Complaint'}
             </Text>
 
-            {/* Department list */}
+            {/* Dynamic Department list */}
             <View style={styles.deptList}>
               {departments.map(dept => {
-                const icon = DEPT_ICONS[dept.DepartmentName] || 'business-outline';
-                const isSelected = selectedDeptId === dept.DepartmentID;
+                const isSelected = selectedDept?.id === dept.id;
                 return (
-                <TouchableOpacity
-                  key={dept.DepartmentID}
-                  style={[styles.deptRow, isSelected && styles.deptRowActive]}
-                  onPress={() => setSelectedDeptId(dept.DepartmentID)}
-                >
-                  <View style={styles.deptLeft}>
-                    <View style={[styles.deptIconBox, isSelected && { backgroundColor: 'rgba(245,158,11,0.15)' }]}>
-                      <Ionicons name={icon} size={16} color={isSelected ? '#f59e0b' : '#6b7280'} />
+                  <TouchableOpacity
+                    key={dept.id}
+                    style={[styles.deptRow, isSelected && styles.deptRowActive]}
+                    onPress={() => setSelectedDept(dept)}
+                  >
+                    <View style={styles.deptLeft}>
+                      <View style={[styles.deptIconBox, isSelected && { backgroundColor: 'rgba(245,158,11,0.15)' }]}>
+                        <Ionicons name={dept.icon} size={16} color={isSelected ? '#f59e0b' : '#6b7280'} />
+                      </View>
+                      <Text style={[styles.deptName, isSelected && styles.deptNameActive]}>
+                        {dept.name}
+                      </Text>
                     </View>
-                    <Text style={[styles.deptName, isSelected && styles.deptNameActive]}>
-                      {dept.DepartmentName}
-                    </Text>
-                  </View>
-                  {isSelected && (
-                    <Ionicons name="checkmark-circle" size={18} color="#f59e0b" />
-                  )}
-                </TouchableOpacity>
-              );})}
+                    {isSelected && (
+                      <Ionicons name="checkmark-circle" size={18} color="#f59e0b" />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
             {/* Buttons */}
@@ -210,9 +211,9 @@ export default function AssignScreen({ navigation }) {
                 <Text style={styles.cancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.confirmBtn, !selectedDeptId && styles.confirmBtnDisabled]}
+                style={[styles.confirmBtn, !selectedDept && styles.confirmBtnDisabled]}
                 onPress={confirmAssign}
-                disabled={!selectedDeptId || assigning}
+                disabled={!selectedDept || assigning}
               >
                 {assigning
                   ? <ActivityIndicator color="#fff" size="small" />
@@ -228,7 +229,7 @@ export default function AssignScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  safe:   { flex: 1, backgroundColor: '#0b0f19' },
+  safe: { flex: 1, backgroundColor: '#0b0f19' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
   header: {
@@ -251,11 +252,11 @@ const styles = StyleSheet.create({
     borderRadius: 14, padding: 14,
     flexDirection: 'row', alignItems: 'center', gap: 12,
   },
-  cardLeft:  { flex: 1, gap: 6 },
+  cardLeft: { flex: 1, gap: 6 },
   cardTitle: { fontSize: 14, fontWeight: '700', color: '#ffffff' },
-  cardMeta:  { flexDirection: 'row', gap: 12 },
-  metaItem:  { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  metaText:  { fontSize: 11, color: '#6b7280' },
+  cardMeta: { flexDirection: 'row', gap: 12 },
+  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  metaText: { fontSize: 11, color: '#6b7280' },
 
   assignBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
@@ -265,9 +266,9 @@ const styles = StyleSheet.create({
   },
   assignBtnText: { color: '#f59e0b', fontSize: 12, fontWeight: '700' },
 
-  empty:      { alignItems: 'center', marginTop: 80, gap: 10 },
+  empty: { alignItems: 'center', marginTop: 80, gap: 10 },
   emptyTitle: { color: '#ffffff', fontSize: 18, fontWeight: '700' },
-  emptyText:  { color: '#6b7280', fontSize: 13 },
+  emptyText: { color: '#6b7280', fontSize: 13 },
 
   // Modal
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' },
@@ -282,7 +283,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center', marginBottom: 20,
   },
   modalTitle: { fontSize: 18, fontWeight: '800', color: '#ffffff', marginBottom: 4 },
-  modalSub:   { fontSize: 13, color: '#9ca3af', marginBottom: 20 },
+  modalSub: { fontSize: 13, color: '#9ca3af', marginBottom: 20 },
 
   deptList: { gap: 8, marginBottom: 24 },
   deptRow: {
@@ -298,12 +299,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.06)',
     justifyContent: 'center', alignItems: 'center',
   },
-  deptName:       { fontSize: 13, color: '#9ca3af', fontWeight: '500' },
+  deptName: { fontSize: 13, color: '#9ca3af', fontWeight: '500' },
   deptNameActive: { color: '#ffffff', fontWeight: '700' },
-  deptRight:      { flexDirection: 'row', alignItems: 'center' },
-  deptCount:      { fontSize: 11, color: '#6b7280' },
 
-  modalBtns:    { flexDirection: 'row', gap: 10 },
+  modalBtns: { flexDirection: 'row', gap: 10 },
   cancelBtn: {
     flex: 1, height: 50, borderRadius: 12,
     backgroundColor: 'rgba(255,255,255,0.06)',

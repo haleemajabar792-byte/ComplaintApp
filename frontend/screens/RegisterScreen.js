@@ -1,23 +1,23 @@
+import { Ionicons } from '@expo/vector-icons';
+import { Picker } from '@react-native-picker/picker';
+import axios from 'axios';
 import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  Alert,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  ScrollView,
-  Platform,
-  StatusBar,
+    ActivityIndicator,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Picker } from '@react-native-picker/picker';
-import { Ionicons } from '@expo/vector-icons';
-import axios from 'axios';
-
-const API_URL = 'http://192.168.0.115:5000';
+import { API_URL } from '../config/api';
+import { saveSession } from '../utils/auth';
 
 const INSTITUTES = [
   'Institute of Technology (IoT)',
@@ -53,7 +53,7 @@ function InputField({ icon, label, value, onChangeText, placeholder, keyboardTyp
   );
 }
 
-export default function RegisterScreen({ navigation }) {
+export default function RegisterScreen({ navigation, onRegisterSuccess }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -91,6 +91,24 @@ export default function RegisterScreen({ navigation }) {
       console.log('Register response:', response.data);
 
       if (response.data.success || response.status === 201) {
+        const data = response.data;
+        const student = data.student || {};
+
+        if (data.token) {
+          await saveSession(
+            data.token,
+            student.id || student.studentId || '',
+            student.name || name.trim(),
+            student.email || userData.email,
+            student.institute || institute,
+            'student',
+            student.phone || phone.trim()
+          );
+          setLoading(false);
+          onRegisterSuccess && onRegisterSuccess('student');
+          return;
+        }
+
         Alert.alert(
           '✅ Account Created!',
           'You can now sign in with your credentials.',
@@ -105,11 +123,20 @@ export default function RegisterScreen({ navigation }) {
       let errorMsg = 'Registration failed. Please try again.';
       
       if (error.response?.status === 409) {
-        errorMsg = 'This email is already registered.';
+        Alert.alert(
+          'Email Already Registered',
+          'This email is already in use. Sign in with the password you used when you created the account.',
+          [
+            { text: 'Go to Login', onPress: () => navigation.navigate('Login') },
+            { text: 'OK', style: 'cancel' },
+          ]
+        );
+        setLoading(false);
+        return;
       } else if (error.response?.data?.message) {
         errorMsg = error.response.data.message;
-      } else if (error.code === 'ECONNREFUSED') {
-        errorMsg = 'Cannot reach backend server. Check your IP and ensure backend is running.';
+      } else if (error.message === 'Network Error' || error.code === 'ECONNREFUSED' || error.code === 'ERR_NETWORK') {
+        errorMsg = `Cannot reach server at ${API_URL}. Start backend (npm start), connect phone to same hotspot/Wi‑Fi, update frontend/config/api.js with laptop IP from ipconfig, then npx expo start -c`;
       }
 
       Alert.alert('Registration Failed', errorMsg);

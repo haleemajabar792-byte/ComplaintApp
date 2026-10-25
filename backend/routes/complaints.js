@@ -9,7 +9,7 @@ const router = express.Router();
 // Submit complaint
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { title, description, categoryId } = req.body;
+    const { title, description, categoryId, departmentId } = req.body;
     const studentId = req.userId;
 
     if (!title || !description || !categoryId) {
@@ -29,7 +29,8 @@ router.post('/', verifyToken, async (req, res) => {
       return res.status(404).json({ message: 'Category not found' });
     }
 
-    const complaint = await Complaint.create(title, description, studentId, categoryId);
+    const parsedDeptId = departmentId ? parseInt(departmentId) : null;
+    const complaint = await Complaint.create(title, description, studentId, categoryId, parsedDeptId);
 
     res.status(201).json({
       message: 'Complaint submitted successfully',
@@ -81,6 +82,32 @@ router.get('/:id', verifyToken, async (req, res) => {
   } catch (error) {
     console.error('Get complaint error:', error.message);
     res.status(500).json({ message: 'Failed to retrieve complaint', error: error.message });
+  }
+});
+
+// Delete complaint
+router.delete('/:id', verifyToken, async (req, res) => {
+  try {
+    const complaintId = req.params.id;
+    const isUserAdmin = req.user?.role === 'admin' || req.userType === 'admin';
+    const studentId = isUserAdmin ? null : req.userId;
+
+    const deleted = await Complaint.delete(complaintId, studentId);
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: 'Complaint not found or you are not authorized to delete it',
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Complaint deleted successfully',
+      complaintId: parseInt(complaintId),
+    });
+  } catch (error) {
+    console.error('Delete complaint error:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to delete complaint', error: error.message });
   }
 });
 

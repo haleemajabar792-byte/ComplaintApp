@@ -18,7 +18,8 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#ffffff"
-      }
+      },
+      "usesCleartextTraffic": true
     },
     "plugins": [
       "expo-font"

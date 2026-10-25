@@ -1,19 +1,18 @@
-import React, { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import axios from 'axios';
+import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ActivityIndicator,
-  ScrollView,
-  TouchableOpacity,
+    ActivityIndicator,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Ionicons } from '@expo/vector-icons';
-
-const API_URL = 'http://192.168.0.115:5000';
+import { API_URL } from '../config/api';
 
 const STAT_CONFIG = [
   { key: 'total',      label: 'Total',       icon: 'layers-outline',       color: '#6366f1', bg: 'rgba(99,102,241,0.12)'  },

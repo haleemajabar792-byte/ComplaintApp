@@ -1,20 +1,19 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  Alert,
-  ScrollView,
-  ActivityIndicator,
-  StyleSheet,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const API_URL = 'http://192.168.0.115:5000';
+import React, { useEffect, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { API_URL } from '../config/api';
 
 const INSTITUTES = [
   'Institute of Technology (IoT)',
@@ -96,8 +95,7 @@ const handleSubmit = async () => {
       categoryId: parseInt(categoryId),
       departmentId: parseInt(departmentId),
       institute: institute,
-      studentId: studentId,
-      studentId: parseInt(studentId)     // ← Yeh line zaroori hai
+      studentId: parseInt(studentId),
     }, {
       headers: { Authorization: `Bearer ${token}` }
     });
@@ -108,6 +106,7 @@ const handleSubmit = async () => {
     setDescription(''); 
     setCategoryId(''); 
     setDepartmentId('');
+    setInstitute('');
   } catch (error) {
     Alert.alert('Error', error.response?.data?.message || 'Failed to submit complaint');
   } finally {

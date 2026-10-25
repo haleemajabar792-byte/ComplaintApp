@@ -68,7 +68,9 @@ function AuthStack({ onLoginSuccess }) {
       <Stack.Screen name="Login">
         {props => <LoginScreen {...props} onLoginSuccess={onLoginSuccess} />}
       </Stack.Screen>
-      <Stack.Screen name="Register" component={RegisterScreen} />
+      <Stack.Screen name="Register">
+        {props => <RegisterScreen {...props} onRegisterSuccess={onLoginSuccess} />}
+      </Stack.Screen>
       <Stack.Screen name="AdminLogin">
         {props => <AdminLoginScreen {...props} onLoginSuccess={onLoginSuccess} />}
       </Stack.Screen>
@@ -114,9 +116,13 @@ export default function Navigation() {
     })();
   }, []);
 
-  const handleLoginSuccess = useCallback(async () => {
+  const handleLoginSuccess = useCallback(async (role = 'student') => {
     const session = await getSession();
-    setAuthState({ checked: true, loggedIn: true, role: session.role || 'student' });
+    setAuthState({
+      checked: true,
+      loggedIn: true,
+      role: role || session.role || 'student',
+    });
   }, []);
 
   const handleLogout = useCallback(async () => {
