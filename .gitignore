@@ -44,4 +44,4 @@ app-example
 
 
 .env
-backend/.env
+# backend/.env is excluded — set env vars in Render/Railway/Heroku dashboard instead

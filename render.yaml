@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: complaint-app-backend
+    env: node
+    region: singapore
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: DB_HOST
+        value: mysql-1e808172-haleemajabar792-8c47.e.aivencloud.com
+      - key: DB_PORT
+        value: 19036
+      - key: DB_USER
+        value: avnadmin
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        value: defaultdb
+      - key: DB_SSL
+        value: "true"
+      - key: JWT_SECRET
+        sync: false
+      - key: NODE_ENV
+        value: production
